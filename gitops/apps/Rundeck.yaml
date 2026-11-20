@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/nsuarezdev/rundeck-platform.git   # <-- your repo
     targetRevision: main
-    path: gitops/manifests/rundeck
+    path: gitops/manifests
   destination:
     server: https://kubernetes.default.svc
     namespace: rundeck
