@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rundeck-logs
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rundeck
+spec:
+  selector:
+    app: rundeck
+  ports:
+    - port: 4440
+      targetPort: 4440
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rundeck
+spec:
+  replicas: 1          # open source Rundeck is single-instance
+  strategy:
+    type: Recreate     # one pod at a time: RWO volume + single-instance app
+  selector:
+    matchLabels:
+      app: rundeck
+  template:
+    metadata:
+      labels:
+        app: rundeck
+    spec:
+      securityContext:
+        fsGroup: 1000  # rundeck user in the image; lets it write to the PVC
+      containers:
+        - name: rundeck
+          image: rundeck/rundeck:6.3.0   # verify the tag on Docker Hub
+          ports:
+            - containerPort: 4440
+          env:
+            # Must match the URL you open in the browser (incl. port if not 80).
+            - name: RUNDECK_GRAILS_URL
+              value: http://rundeck.localtest.me:8080
+            - name: RUNDECK_SERVER_FORWARDED
+              value: "true"
+            - name: RUNDECK_DATABASE_DRIVER
+              value: org.postgresql.Driver
+            - name: RUNDECK_DATABASE_URL
+              value: jdbc:postgresql://postgres:5432/rundeck
+            - name: RUNDECK_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef: { name: rundeck-db, key: username }
+            - name: RUNDECK_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: rundeck-db, key: password }
+          readinessProbe:
+            httpGet: { path: /, port: 4440 }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 18
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { memory: 2Gi }
+          volumeMounts:
+            - name: logs
+              mountPath: /home/rundeck/var/logs
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: rundeck-logs
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rundeck
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rundeck.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rundeck
+                port:
+                  number: 4440
